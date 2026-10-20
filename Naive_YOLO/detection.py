@@ -2,9 +2,9 @@
 """Baseline: run a YOLOv8/YOLO11 ONNX model (detect or OBB) on the live Pi camera feed, printing live FPS.
 
 Usage:
-    python3 yolo_live.py --model best.onnx
-    python3 yolo_live.py --model best.onnx --show          # live window (run on the Pi desktop)
-    python3 yolo_live.py --model best.onnx --conf 0.4 --save-every 30
+    python3 detection.py --model best.onnx
+    python3 detection.py --model best.onnx --show          # live window (run on the Pi desktop)
+    python3 detection.py --model best.onnx --conf 0.4 --save-every 30
 
 Deps: picamera2 (system), numpy, pillow, onnxruntime
 Stop with Ctrl+C.
@@ -17,7 +17,6 @@ from collections import deque
 
 import numpy as np
 import onnxruntime as ort
-from picamera2 import Picamera2, Preview
 from PIL import Image, ImageDraw
 
 
@@ -206,6 +205,7 @@ def main():
         names = [str(i) for i in range(out.shape[1] - n_extra)]
     print(f"Model: {args.model} | task {task} | input {inp.shape} | output {out.shape} | classes: {names}")
 
+    from picamera2 import Picamera2, Preview  # imported here so other scripts can reuse this module off-Pi
     cam = Picamera2()
     # "XBGR8888" gives an (H, W, 4) array in R,G,B,X order. 32-bit formats are what the GL preview supports.
     cam.configure(cam.create_video_configuration(

@@ -1,0 +1,9 @@
+{
+  "surge": 0.35,
+  "yaw_cmd": 0.84,
+  "deadband": 0.33,
+  "smooth": 0.5,
+  "lost_hold": 1.0,
+  "proportional": false,
+  "yaw_sign": 1.0
+}

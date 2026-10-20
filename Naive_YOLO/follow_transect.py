@@ -9,12 +9,11 @@ Examples:
     python3 follow_transect.py --model ../best.onnx --dry-run --save-every 5
 
     # in the water (arms the vehicle itself after the start delay)
-    python3 follow_transect.py --model ../best.onnx --arm --max-seconds 60 --log run1.csv
+    python3 follow_transect.py --model ../best.onnx --arm --max-seconds 60
 
 Ctrl+C always sends neutral (and disarms if this script armed).
 """
 import argparse
-import csv
 import sys
 import time
 
@@ -22,10 +21,11 @@ import numpy as np
 import onnxruntime as ort
 
 # reuse the preprocessing / OBB decoding from the baseline script
-from yolo_live import letterbox, postprocess, read_metadata
-from naive_controller import NaiveConfig, NaiveController, box_offset, pick_detection
+from detection import letterbox, postprocess, read_metadata
+from controller import NaiveConfig, NaiveController, box_offset, pick_detection
 from vehicle import DryRunVehicle, MavVehicle
 from stream import Streamer, annotate
+from log import LOG_DIR, RunLogger
 
 
 def parse_args():
@@ -35,6 +35,8 @@ def parse_args():
     p.add_argument("--conf", type=float, default=0.35)
     p.add_argument("--iou", type=float, default=0.45)
     p.add_argument("--threads", type=int, default=4)
+    p.add_argument("--webcam", type=int, nargs="?", const=0, default=None, metavar="INDEX",
+                   help="use an OpenCV webcam (default index 0) instead of the Pi camera, for testing on a laptop")
     p.add_argument("--cam-size", type=int, nargs=2, default=[640, 480], metavar=("W", "H"))
 
     g = p.add_argument_group("control")
@@ -59,9 +61,13 @@ def parse_args():
 
     g = p.add_argument_group("debug")
     g.add_argument("--save-every", type=int, default=0, help="save annotated last_frame.jpg every N frames")
-    g.add_argument("--log", help="CSV file with per-frame telemetry")
+    g.add_argument("--log-dir", default=LOG_DIR, help="folder for the per-run CSV logs (named by start time)")
+    g.add_argument("--no-log", action="store_true", help="don't write a run log")
     g.add_argument("--stream", type=int, default=0, metavar="PORT",
                    help="serve live video + status page at http://<ip>:PORT/ (see stream.py; 0 = off)")
+    g.add_argument("--params", default="params.json",
+                   help="JSON file for values edited on the web page: loaded at start (overrides the flags "
+                        "above for those values) and rewritten on every change")
     g.add_argument("--stream-fps", type=float, default=10.0, help="max frames/s pushed to the stream")
     return p.parse_args()
 
@@ -91,19 +97,40 @@ def main():
     vehicle.connect()
 
     # ---- camera
-    from picamera2 import Picamera2
-    cam = Picamera2()
-    cam.configure(cam.create_video_configuration(main={"size": (W, H), "format": "XBGR8888"}))
-    cam.start()
+    if args.webcam is not None:
+        import cv2
+
+        class WebcamCamera:
+            """OpenCV webcam with the same capture_array()/close() interface as Picamera2 (returns RGB)."""
+            def __init__(self, index):
+                self.cap = cv2.VideoCapture(index)
+                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, W)
+                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, H)
+                if not self.cap.isOpened():
+                    sys.exit(f"Could not open webcam {index}")
+
+            def capture_array(self):
+                ok, bgr = self.cap.read()
+                if not ok:
+                    raise RuntimeError("webcam read failed")
+                return cv2.cvtColor(cv2.resize(bgr, (W, H)), cv2.COLOR_BGR2RGB)
+
+            def close(self):
+                self.cap.release()
+
+        cam = WebcamCamera(args.webcam)
+    else:
+        from picamera2 import Picamera2
+        cam = Picamera2()
+        cam.configure(cam.create_video_configuration(main={"size": (W, H), "format": "XBGR8888"}))
+        cam.start()
     time.sleep(1)
     session.run(None, {inp.name: np.zeros((1, 3, in_size, in_size), dtype=np.float32)})  # warm-up
 
-    logf = open(args.log, "w", newline="") if args.log else None
-    logw = csv.writer(logf) if logf else None
-    if logw:
-        logw.writerow(["t", "state", "score", "offset", "surge", "yaw", "infer_ms"])
+    logger = None if args.no_log else RunLogger(args.log_dir, ctrl.cfg)  # new timestamped CSV for every run
 
-    streamer = (Streamer(args.stream, args.deadband, args.stream_fps, dry_run=args.dry_run)
+    streamer = (Streamer(args.stream, args.deadband, args.stream_fps, dry_run=args.dry_run,
+                         cfg=ctrl.cfg, params_path=args.params)
                 if args.stream else None)
     if streamer:
         print(f"Live view: http://<pi-ip>:{args.stream}/")
@@ -151,9 +178,8 @@ def main():
                 annotate(frame, det, tel, cmd, args.deadband)
             if streamer:
                 streamer.update(frame, det, tel, cmd, offset, infer_ms)
-            if logw:
-                logw.writerow([f"{time.monotonic()-t_start:.3f}", tel.state, f"{det[5]:.3f}" if det else "",
-                               f"{tel.offset:.4f}", f"{cmd.surge:.3f}", f"{cmd.yaw:.3f}", f"{infer_ms:.0f}"])
+            if logger:
+                logger.log(time.monotonic() - t_start, tel.state, det, offset, tel.offset, cmd, infer_ms)
             if not args.dry_run:
                 sys.stdout.write(f"\r{tel.state:5s} offset={tel.offset:+.2f} surge={cmd.surge:+.2f} "
                                  f"yaw={cmd.yaw:+.2f} infer={infer_ms:.0f}ms   ")
@@ -167,8 +193,8 @@ def main():
             cam.close()
             if streamer:
                 streamer.close()
-            if logf:
-                logf.close()
+            if logger:
+                logger.close()
             print("Done.")
 
 

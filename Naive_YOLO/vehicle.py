@@ -10,7 +10,7 @@ NOTE: only one process can own /dev/ttyAMA0, so don't run this at the same time 
 import threading
 import time
 
-from naive_controller import Command
+from controller import Command
 
 
 def _clip(v):

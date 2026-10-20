@@ -20,7 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from PIL import Image, ImageDraw
 
-from yolo_live import box_corners
+from detection import box_corners
 
 
 # --------------------------------------------------------------------------- drawing
@@ -43,6 +43,19 @@ def annotate(frame, det, tel, cmd, deadband, path="last_frame.jpg"):
     """Save the annotated image to disk (atomically, so viewers never see a half-written file)."""
     render(frame, det, tel, cmd, deadband).save(path + ".tmp.jpg")
     os.replace(path + ".tmp.jpg", path)
+
+
+# --------------------------------------------------------------------------- tunable parameters
+# (NaiveConfig field, label, kind, min, max, step); kind "sign" is a checkbox that maps checked -> -1
+TUNABLES = [
+    ("surge", "Surge", "float", 0.0, 0.5, 0.01),
+    ("yaw_cmd", "Yaw command", "float", 0.0, 1.0, 0.01),
+    ("deadband", "Deadband", "float", 0.0, 0.5, 0.01),
+    ("smooth", "Smoothing (1 = none)", "float", 0.05, 1.0, 0.05),
+    ("lost_hold", "Lost hold (s)", "float", 0.0, 5.0, 0.1),
+    ("proportional", "Proportional yaw", "bool", 0, 1, 1),
+    ("yaw_sign", "Invert yaw", "sign", -1, 1, 1),
+]
 
 
 # --------------------------------------------------------------------------- web page
@@ -99,10 +112,43 @@ PAGE = b"""<!doctype html>
     <tr><td>Loop rate</td><td id="fps">--</td></tr>
     <tr><td>Run time</td><td id="t">--</td></tr>
   </table>
+  <h2 style="margin-top:22px">CONTROLS <span id="saved" style="color:#4ade80;font-weight:400"></span></h2>
+  <div id="ctl"></div>
   <div id="stale">No status updates (script stopped?)</div>
 </div>
 <script>
 const $ = id => document.getElementById(id);
+let saveTimer = null;
+function post(name, value) {
+  fetch("/params", {method: "POST", headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({[name]: value})})
+    .then(() => { $("saved").textContent = "saved"; clearTimeout(saveTimer);
+                  saveTimer = setTimeout(() => $("saved").textContent = "", 1200); });
+}
+async function buildControls() {
+  const p = await (await fetch("/params", {cache: "no-store"})).json();
+  p.spec.forEach(s => {
+    const row = document.createElement("div"); row.className = "row";
+    const v = p.values[s.name];
+    if (s.kind === "float") {
+      row.innerHTML = '<div class="lbl"><span>' + s.label + '</span><input type="number" min="' + s.min +
+        '" max="' + s.max + '" step="' + s.step + '" value="' + v + '" style="width:70px"></div>' +
+        '<input type="range" min="' + s.min + '" max="' + s.max + '" step="' + s.step + '" value="' + v +
+        '" style="width:100%">';
+      const num = row.querySelector("input[type=number]"), rng = row.querySelector("input[type=range]");
+      let t = null;
+      rng.oninput = () => { num.value = rng.value; clearTimeout(t); t = setTimeout(() => post(s.name, +rng.value), 150); };
+      num.onchange = () => { rng.value = num.value; post(s.name, +num.value); };
+    } else {                                   // "bool" or "sign" (checked = -1)
+      const on = s.kind === "sign" ? v < 0 : !!v;
+      row.innerHTML = '<label><input type="checkbox"' + (on ? " checked" : "") + '> ' + s.label + '</label>';
+      row.querySelector("input").onchange = e =>
+        post(s.name, s.kind === "sign" ? (e.target.checked ? -1 : 1) : e.target.checked);
+    }
+    $("ctl").appendChild(row);
+  });
+}
+buildControls();
 const f = (v, n=2, sign=true) => v == null ? "--" : (sign && v >= 0 ? "+" : "") + v.toFixed(n);
 function centredFill(el, v) {          // bar growing from the middle, v in -1..1
   v = Math.max(-1, Math.min(1, v));
@@ -118,7 +164,7 @@ async function tick() {
     $("state").textContent = s.state; $("state").className = "state " + s.state;
     $("offset").textContent = f(s.offset);
     $("odot").style.left = (50 + Math.max(-1, Math.min(1, s.offset)) * 50) + "%";
-    if (!dbSet) { $("db").style.left = (50 - s.deadband * 50) + "%"; $("db").style.width = s.deadband * 100 + "%"; dbSet = true; }
+    $("db").style.left = (50 - s.deadband * 50) + "%"; $("db").style.width = s.deadband * 100 + "%";
     $("surge").textContent = f(s.surge); centredFill($("sfill"), s.surge);
     $("yaw").textContent = f(s.yaw);     centredFill($("yfill"), s.yaw);
     $("raw").textContent = s.raw_offset == null ? "no detection" : f(s.raw_offset);
@@ -137,8 +183,11 @@ setInterval(tick, 150); tick();
 class Streamer:
     """Background HTTP server; feed it one update() per control-loop iteration."""
 
-    def __init__(self, port, deadband, fps=10.0, quality=70, dry_run=False):
-        self.deadband, self.min_dt, self.quality, self.dry_run = deadband, 1.0 / fps, quality, dry_run
+    def __init__(self, port, deadband, fps=10.0, quality=70, dry_run=False, cfg=None, params_path=None):
+        self._deadband, self.min_dt, self.quality, self.dry_run = deadband, 1.0 / fps, quality, dry_run
+        self.cfg, self.params_path = cfg, params_path     # cfg: live NaiveConfig edited from the web page
+        self._plock = threading.Lock()
+        self._load_params()
         self._jpeg = None
         self._cond = threading.Condition()
         self._status = {"state": "WAIT", "offset": 0.0, "raw_offset": None, "surge": 0.0, "yaw": 0.0,
@@ -167,12 +216,27 @@ class Streamer:
                         self._send(PAGE, "text/html; charset=utf-8")
                     elif self.path == "/status":
                         self._send(streamer._status_json(), "application/json")
+                    elif self.path == "/params":
+                        self._send(streamer._params_json(), "application/json")
                     elif self.path.startswith("/stream"):
                         self._stream()
                     else:
                         self.send_error(404)
                 except (BrokenPipeError, ConnectionResetError):
                     pass
+
+            def do_POST(self):
+                try:
+                    if self.path != "/params":
+                        self.send_error(404)
+                        return
+                    n = int(self.headers.get("Content-Length", 0))
+                    streamer.set_params(json.loads(self.rfile.read(n) or b"{}"))
+                    self._send(streamer._params_json(), "application/json")
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                except (ValueError, TypeError):
+                    self.send_error(400)
 
             def _stream(self):
                 self.send_response(200)
@@ -212,10 +276,12 @@ class Streamer:
             inst = 1.0 / dt if dt > 0 else None
             fps = inst if old_fps is None or inst is None else old_fps + 0.2 * (inst - old_fps)  # smoothed
             self._status = {
-                "state": tel.state, "offset": float(tel.offset), "raw_offset": raw_offset,
+                "state": tel.state, "offset": float(tel.offset),
+                "raw_offset": float(raw_offset) if raw_offset is not None else None,
                 "surge": float(cmd.surge), "yaw": float(cmd.yaw),
                 "score": float(det[5]) if det is not None else None,
-                "infer_ms": infer_ms, "fps": fps, "elapsed": now - self._t0,
+                "infer_ms": float(infer_ms) if infer_ms is not None else None,
+                "fps": fps, "elapsed": now - self._t0,
             }
             self._status_t = now
             watching = self._clients > 0
@@ -227,11 +293,59 @@ class Streamer:
                 self._jpeg = buf.getvalue()
                 self._cond.notify_all()
 
+    @property
+    def deadband(self):
+        """Current deadband (live value from the config if there is one, so the overlay follows the slider)."""
+        return self.cfg.deadband if self.cfg is not None else self._deadband
+
+    # ---- tunable parameters (edited from the web page, saved to params_path)
+    def _load_params(self):
+        """Apply values saved in params_path (if it exists) to the config at startup."""
+        if self.cfg is None or not self.params_path or not os.path.exists(self.params_path):
+            return
+        try:
+            with open(self.params_path) as f:
+                self._apply(json.load(f))
+            print(f"Loaded parameters from {self.params_path}")
+        except (OSError, ValueError) as e:
+            print(f"Could not load {self.params_path}: {e}")
+
+    def _apply(self, d):
+        """Validate/clamp each known value and set it on the config."""
+        for name, _label, kind, lo, hi, _step in TUNABLES:
+            if name not in d:
+                continue
+            v = d[name]
+            if kind == "float":
+                v = max(lo, min(hi, float(v)))
+            elif kind == "bool":
+                v = bool(v)
+            else:  # sign
+                v = -1.0 if float(v) < 0 else 1.0
+            setattr(self.cfg, name, v)
+
+    def set_params(self, d):
+        """Apply new values to the live controller config and write all current values to params_path."""
+        if self.cfg is None:
+            return
+        with self._plock:
+            self._apply(d)
+            if self.params_path:
+                values = {t[0]: getattr(self.cfg, t[0]) for t in TUNABLES}
+                with open(self.params_path + ".tmp", "w") as f:
+                    json.dump(values, f, indent=2)
+                os.replace(self.params_path + ".tmp", self.params_path)
+
+    def _params_json(self):
+        spec = [dict(name=n, label=l, kind=k, min=lo, max=hi, step=st) for n, l, k, lo, hi, st in TUNABLES]
+        values = {t[0]: getattr(self.cfg, t[0]) for t in TUNABLES} if self.cfg is not None else {}
+        return json.dumps({"spec": spec, "values": values}, default=float).encode()
+
     def _status_json(self):
         with self._lock:
             s = dict(self._status, deadband=self.deadband, dry_run=self.dry_run,
                      age=time.monotonic() - self._status_t, server_time=time.time())
-        return json.dumps(s).encode()
+        return json.dumps(s, default=float).encode()  # default=float catches any stray numpy scalars
 
     def close(self):
         self._server.shutdown()

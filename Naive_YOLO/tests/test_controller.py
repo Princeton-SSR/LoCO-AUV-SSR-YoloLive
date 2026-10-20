@@ -1,5 +1,10 @@
-"""Sanity tests for NaiveController (no hardware needed).  Run:  python3 test_controller.py"""
-from naive_controller import NaiveController, NaiveConfig, box_offset
+"""Sanity tests for NaiveController (no hardware needed).  Run from Naive_YOLO/:  python3 tests/test_controller.py"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # so `controller` is importable from tests/
+
+from controller import NaiveController, NaiveConfig, box_offset
 
 
 def test_directions():
