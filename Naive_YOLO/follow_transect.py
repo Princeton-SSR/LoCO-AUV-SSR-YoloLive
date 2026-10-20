@@ -63,8 +63,9 @@ def parse_args():
     g.add_argument("--save-every", type=int, default=0, help="save annotated last_frame.jpg every N frames")
     g.add_argument("--log-dir", default=LOG_DIR, help="folder for the per-run CSV logs (named by start time)")
     g.add_argument("--no-log", action="store_true", help="don't write a run log")
-    g.add_argument("--stream", type=int, default=0, metavar="PORT",
-                   help="serve live video + status page at http://<ip>:PORT/ (see stream.py; 0 = off)")
+    g.add_argument("--stream", type=int, nargs="?", const=8000, default=0, metavar="PORT",
+                   help="serve live video + status page at http://<ip>:PORT/ (see stream.py). "
+                        "Bare --stream uses port 8000; omit the flag (or pass 0) to turn it off")
     g.add_argument("--params", default="params.json",
                    help="JSON file for values edited on the web page: loaded at start (overrides the flags "
                         "above for those values) and rewritten on every change")
@@ -98,6 +99,7 @@ def main():
 
     # ---- camera
     if args.webcam is not None:
+        # This part is for testing it on my computer 
         import cv2
 
         class WebcamCamera:
