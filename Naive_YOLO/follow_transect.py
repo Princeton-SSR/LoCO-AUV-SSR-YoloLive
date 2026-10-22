@@ -6,10 +6,10 @@ Pipeline per frame:  camera -> YOLO OBB -> best box -> horizontal offset from im
 
 Examples:
     # bench test: real camera + model, commands only printed, annotated frames saved
-    python3 follow_transect.py --model ../best.onnx --dry-run --save-every 5
+    python3 follow_transect.py --model ../best_dillon.onnx --dry-run --save-every 5
 
     # in the water (arms the vehicle itself after the start delay)
-    python3 follow_transect.py --model ../best.onnx --arm --max-seconds 60
+    python3 follow_transect.py --model ../best_dillon.onnx --arm --max-seconds 60
 
 Ctrl+C always sends neutral (and disarms if this script armed).
 """

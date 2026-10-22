@@ -2,9 +2,9 @@
 """Baseline: run a YOLOv8/YOLO11 ONNX model (detect or OBB) on the live Pi camera feed, printing live FPS.
 
 Usage:
-    python3 detection.py --model best.onnx
-    python3 detection.py --model best.onnx --show          # live window (run on the Pi desktop)
-    python3 detection.py --model best.onnx --conf 0.4 --save-every 30
+    python3 detection.py --model best_dillon.onnx
+    python3 detection.py --model best_dillon.onnx --show          # live window (run on the Pi desktop)
+    python3 detection.py --model best_dillon.onnx --conf 0.4 --save-every 30
 
 Deps: picamera2 (system), numpy, pillow, onnxruntime
 Stop with Ctrl+C.
