@@ -37,6 +37,9 @@ def parse_args():
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--webcam", type=int, nargs="?", const=0, default=None, metavar="INDEX",
                    help="use an OpenCV webcam (default index 0) instead of the Pi camera, for testing on a laptop")
+    p.add_argument("--rotate", type=int, choices=[0, 180], default=180,
+                   help="rotate the camera image before processing; default 180 because the camera is mounted "
+                        "upside down (use 0 for an upright camera / webcam)")
     p.add_argument("--cam-size", type=int, nargs=2, default=[640, 480], metavar=("W", "H"))
 
     g = p.add_argument_group("control")
@@ -44,6 +47,8 @@ def parse_args():
     g.add_argument("--yaw", type=float, default=0.30, help="yaw command magnitude (max, if --proportional)")
     g.add_argument("--deadband", type=float, default=0.10,
                    help="no yaw while the box centre is within this fraction of half the image width")
+    g.add_argument("--deadband-center", type=float, default=0.0,
+                   help="shift the deadband left (-) / right (+), in half-image-widths (0 = image centre)")
     g.add_argument("--proportional", action="store_true", help="scale yaw with the offset instead of fixed +-yaw")
     g.add_argument("--smooth", type=float, default=0.5, help="weight of the newest offset in the moving average")
     g.add_argument("--yaw-sign", type=float, default=1.0, help="use -1 if the robot yaws away from the line")
@@ -54,6 +59,8 @@ def parse_args():
     g.add_argument("--dry-run", action="store_true", help="don't touch MAVLink, just print commands")
     g.add_argument("--port", default="/dev/ttyAMA0")
     g.add_argument("--baud", type=int, default=921600)
+    g.add_argument("--source-system", type=int, default=255,
+                   help="MAVLink system ID we send as; must match the autopilot's SYSID_MYGCS (255 by default)")
     g.add_argument("--mode", default="STABILIZE")
     g.add_argument("--arm", action="store_true", help="arm after the start delay (and disarm at the end)")
     g.add_argument("--start-delay", type=float, default=10.0)
@@ -90,11 +97,11 @@ def main():
     # ---- control
     W, H = args.cam_size
     ctrl = NaiveController(NaiveConfig(
-        surge=args.surge, yaw_cmd=args.yaw, deadband=args.deadband, proportional=args.proportional,
+        surge=args.surge, yaw_cmd=args.yaw, deadband=args.deadband, deadband_center=args.deadband_center, proportional=args.proportional,
         smooth=args.smooth, yaw_sign=args.yaw_sign, lost_hold=args.lost_hold))
 
     # ---- vehicle
-    vehicle = DryRunVehicle() if args.dry_run else MavVehicle(args.port, args.baud, args.mode)
+    vehicle = DryRunVehicle() if args.dry_run else MavVehicle(args.port, args.baud, args.mode, source_system=args.source_system)
     vehicle.connect()
 
     # ---- camera
@@ -157,7 +164,10 @@ def main():
                 break
 
             # --- grab a frame and prepare it for the model
-            frame = np.ascontiguousarray(cam.capture_array()[..., :3])
+            frame = cam.capture_array()[..., :3]
+            if args.rotate == 180:
+                frame = frame[::-1, ::-1]   # camera is mounted upside down: undo it before ANY processing
+            frame = np.ascontiguousarray(frame)
             img, scale, pad = letterbox(frame, in_size)
             blob = (img.astype(np.float32) / 255.0).transpose(2, 0, 1)[None]
             # --- run YOLO and decode the oriented boxes
@@ -177,7 +187,7 @@ def main():
             # --- optional debug output: annotated image, CSV log, console status
             n += 1
             if args.save_every and n % args.save_every == 0:
-                annotate(frame, det, tel, cmd, args.deadband)
+                annotate(frame, det, tel, cmd, ctrl.cfg.deadband, deadband_center=ctrl.cfg.deadband_center)
             if streamer:
                 streamer.update(frame, det, tel, cmd, offset, infer_ms)
             if logger:

@@ -43,8 +43,10 @@ class DryRunVehicle:
 class MavVehicle:
     """Real vehicle over MAVLink: sends surge/yaw as MANUAL_CONTROL and handles heartbeat, mode, arm/disarm."""
 
-    def __init__(self, port="/dev/ttyAMA0", baud=921600, mode="STABILIZE", send_hz=20.0, cmd_timeout=0.5):
-        self.port, self.baud, self.mode = port, baud, mode
+    def __init__(self, port="/dev/ttyAMA0", baud=921600, mode="STABILIZE", send_hz=20.0, cmd_timeout=0.5,
+                 source_system=255):
+        # source_system must equal the autopilot's SYSID_MYGCS (default 255), or MANUAL_CONTROL / arm are ignored
+        self.port, self.baud, self.mode, self.source_system = port, baud, mode, source_system
         self.send_period = 1.0 / send_hz
         self.cmd_timeout = cmd_timeout
         self._cmd, self._cmd_t = Command(), 0.0
@@ -58,7 +60,7 @@ class MavVehicle:
         """Open the serial link, wait for the autopilot heartbeat, set the flight mode, start the background threads."""
         from pymavlink import mavutil
         self._mavutil = mavutil
-        self.loco = mavutil.mavlink_connection(self.port, baud=self.baud, source_system=1)
+        self.loco = mavutil.mavlink_connection(self.port, baud=self.baud, source_system=self.source_system)
         self.loco.wait_heartbeat()
         self.loco.target_system = 1
         self.loco.target_component = 1
@@ -99,12 +101,28 @@ class MavVehicle:
         with self._cmd_lock:
             self._cmd, self._cmd_t = cmd, time.monotonic()
 
-    def arm(self):
-        """Arm the motors and block until the autopilot confirms."""
-        self.loco.arducopter_arm()
-        self.loco.motors_armed_wait()
-        self._armed_by_us = True
-        print("Armed")
+    def arm(self, timeout=8.0):
+        """Arm the motors; resend every 2 s and give up after `timeout` s, printing the autopilot's messages.
+
+        Raises RuntimeError if arming isn't confirmed (e.g. a pre-arm check failed or the command was ignored).
+        """
+        self._armed_by_us = True   # so close() disarms even if the arm confirmation arrives late
+        end, last_send = time.monotonic() + timeout, 0.0
+        while time.monotonic() < end:
+            if time.monotonic() - last_send > 2.0:
+                with self._tx_lock:
+                    self.loco.arducopter_arm()
+                last_send = time.monotonic()
+            m = self.loco.recv_match(type=["HEARTBEAT", "STATUSTEXT", "COMMAND_ACK"], blocking=True, timeout=0.5)
+            if m is not None and m.get_type() == "STATUSTEXT":
+                print(f"[autopilot] {m.text}")
+            elif m is not None and m.get_type() == "COMMAND_ACK" and m.command == 400:
+                print(f"[autopilot] arm command ack result={m.result} (0 = accepted)")
+            if self.loco.motors_armed():
+                print("Armed")
+                return
+        raise RuntimeError(f"Arming not confirmed after {timeout:.0f} s (check pre-arm messages above, "
+                           "SYSID_MYGCS, or arm from QGC to see the reason)")
 
     def disarm(self):
         """Command neutral for a second, then disarm and block until the autopilot confirms."""

@@ -1,9 +1,10 @@
 {
-  "surge": 0.35,
-  "yaw_cmd": 0.84,
-  "deadband": 0.33,
+  "surge": 0.25,
+  "yaw_cmd": 0.2,
+  "deadband": 0.1,
+  "deadband_center": 0.1,
   "smooth": 0.5,
-  "lost_hold": 1.0,
+  "lost_hold": 0.0,
   "proportional": false,
   "yaw_sign": 1.0
 }

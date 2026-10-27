@@ -24,7 +24,7 @@ from detection import box_corners
 
 
 # --------------------------------------------------------------------------- drawing
-def render(frame, det, tel, cmd, deadband):
+def render(frame, det, tel, cmd, deadband, deadband_center=0.0):
     """Annotated PIL image: OBB (green), image centre and deadband (blue), and a status line."""
     img = Image.fromarray(frame)
     d = ImageDraw.Draw(img)
@@ -32,16 +32,22 @@ def render(frame, det, tel, cmd, deadband):
     if det is not None:
         d.polygon(box_corners(*det[:5]), outline=(0, 255, 0), width=2)
     cx, half_db = w / 2, deadband * w / 2
-    d.line([cx, 0, cx, h], fill=(0, 160, 255), width=1)
-    d.rectangle([cx - half_db, 0, cx + half_db, h], outline=(0, 160, 255))
+    bc = cx + deadband_center * w / 2          # centre of the deadband (image centre shifted by deadband_center)
+    d.line([bc, 0, bc, h], fill=(0, 160, 255), width=1)
+    d.rectangle([bc - half_db, 0, bc + half_db, h], outline=(0, 160, 255))
+    if det is not None:  # box centre: black inside the deadband (no yaw), red outside (steering). Uses the smoothed offset like the controller
+        inside = abs(tel.offset - deadband_center) < deadband
+        col = (0, 0, 0) if inside else (255, 0, 0)
+        x, y = det[0], det[1]
+        d.ellipse([x - 6, y - 6, x + 6, y + 6], fill=col, outline=(255, 255, 255))
     d.text((8, 8), f"{tel.state} offset={tel.offset:+.2f} surge={cmd.surge:+.2f} yaw={cmd.yaw:+.2f}",
            fill=(255, 255, 0))
     return img
 
 
-def annotate(frame, det, tel, cmd, deadband, path="last_frame.jpg"):
+def annotate(frame, det, tel, cmd, deadband, path="last_frame.jpg", deadband_center=0.0):
     """Save the annotated image to disk (atomically, so viewers never see a half-written file)."""
-    render(frame, det, tel, cmd, deadband).save(path + ".tmp.jpg")
+    render(frame, det, tel, cmd, deadband, deadband_center).save(path + ".tmp.jpg")
     os.replace(path + ".tmp.jpg", path)
 
 
@@ -51,6 +57,7 @@ TUNABLES = [
     ("surge", "Surge", "float", 0.0, 0.5, 0.01),
     ("yaw_cmd", "Yaw command", "float", 0.0, 1.0, 0.01),
     ("deadband", "Deadband", "float", 0.0, 0.5, 0.01),
+    ("deadband_center", "Deadband centre (- left / + right)", "float", -0.5, 0.5, 0.01),
     ("smooth", "Smoothing (1 = none)", "float", 0.05, 1.0, 0.05),
     ("lost_hold", "Lost hold (s)", "float", 0.0, 5.0, 0.1),
     ("proportional", "Proportional yaw", "bool", 0, 1, 1),
@@ -164,7 +171,7 @@ async function tick() {
     $("state").textContent = s.state; $("state").className = "state " + s.state;
     $("offset").textContent = f(s.offset);
     $("odot").style.left = (50 + Math.max(-1, Math.min(1, s.offset)) * 50) + "%";
-    $("db").style.left = (50 - s.deadband * 50) + "%"; $("db").style.width = s.deadband * 100 + "%";
+    $("db").style.left = (50 + (s.deadband_center - s.deadband) * 50) + "%"; $("db").style.width = s.deadband * 100 + "%";
     $("surge").textContent = f(s.surge); centredFill($("sfill"), s.surge);
     $("yaw").textContent = f(s.yaw);     centredFill($("yfill"), s.yaw);
     $("raw").textContent = s.raw_offset == null ? "no detection" : f(s.raw_offset);
@@ -288,7 +295,7 @@ class Streamer:
         if watching and now - self._last_push >= self.min_dt:
             self._last_push = now
             buf = io.BytesIO()
-            render(frame, det, tel, cmd, self.deadband).save(buf, format="JPEG", quality=self.quality)
+            render(frame, det, tel, cmd, self.deadband, self.deadband_center).save(buf, format="JPEG", quality=self.quality)
             with self._cond:
                 self._jpeg = buf.getvalue()
                 self._cond.notify_all()
@@ -297,6 +304,11 @@ class Streamer:
     def deadband(self):
         """Current deadband (live value from the config if there is one, so the overlay follows the slider)."""
         return self.cfg.deadband if self.cfg is not None else self._deadband
+
+    @property
+    def deadband_center(self):
+        """Current deadband centre offset (live from the config), 0 = image centre."""
+        return getattr(self.cfg, "deadband_center", 0.0) if self.cfg is not None else 0.0
 
     # ---- tunable parameters (edited from the web page, saved to params_path)
     def _load_params(self):
@@ -343,7 +355,7 @@ class Streamer:
 
     def _status_json(self):
         with self._lock:
-            s = dict(self._status, deadband=self.deadband, dry_run=self.dry_run,
+            s = dict(self._status, deadband=self.deadband, deadband_center=self.deadband_center, dry_run=self.dry_run,
                      age=time.monotonic() - self._status_t, server_time=time.time())
         return json.dumps(s, default=float).encode()  # default=float catches any stray numpy scalars
 

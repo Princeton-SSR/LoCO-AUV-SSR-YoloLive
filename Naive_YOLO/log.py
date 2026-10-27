@@ -14,7 +14,7 @@ One row per control-loop iteration:
     offset      smoothed offset used by the controller
     surge, yaw  commands sent to the vehicle, -1..1
     infer_ms    model inference time
-    param_*     controller parameters in effect for that frame (surge, yaw_cmd, deadband, smooth, lost_hold,
+    param_*     controller parameters in effect for that frame (surge, yaw_cmd, deadband, deadband_center, smooth, lost_hold,
                 proportional, yaw_sign); they change mid-run if edited on the web page
 
 Usage:
@@ -31,7 +31,7 @@ LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 
 # Controller parameters recorded on every row (columns are named param_<name>). Logged per row, not once,
 # because they can be changed live from the web page during a run.
-PARAM_FIELDS = ["surge", "yaw_cmd", "deadband", "smooth", "lost_hold", "proportional", "yaw_sign"]
+PARAM_FIELDS = ["surge", "yaw_cmd", "deadband", "deadband_center", "smooth", "lost_hold", "proportional", "yaw_sign"]
 
 COLUMNS = ["wall_time", "t", "frame", "state", "detected", "score",
            "box_cx", "box_cy", "box_w", "box_h", "box_angle",

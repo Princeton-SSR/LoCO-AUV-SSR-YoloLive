@@ -20,6 +20,19 @@ def test_directions():
     print("ok  directions + deadband")
 
 
+def test_deadband_center():
+    # centre shifted right by 0.4: a line at +0.4 is "centred" (no yaw), at 0 it is now too far left (yaw left)
+    cfg = dict(deadband=0.1, deadband_center=0.4, smooth=1.0)
+    c, _ = NaiveController(NaiveConfig(**cfg)).update(0.4, 0.0)
+    assert c.yaw == 0 and c.surge > 0
+    c, _ = NaiveController(NaiveConfig(**cfg)).update(0.0, 0.0)
+    assert c.yaw < 0
+    c, _ = NaiveController(NaiveConfig(**cfg)).update(0.8, 0.0)
+    assert c.yaw > 0
+    assert NaiveController(NaiveConfig(deadband=0.1, smooth=1.0)).update(0.4, 0.0)[0].yaw > 0  # default centre unchanged
+    print("ok  deadband_center")
+
+
 def test_proportional_and_sign():
     ctrl = NaiveController(NaiveConfig(proportional=True, smooth=1.0))
     small, _ = ctrl.update(0.2, 0.0)
@@ -55,6 +68,7 @@ def test_offset_and_lost():
 if __name__ == "__main__":
     test_offset_and_lost()
     test_directions()
+    test_deadband_center()
     test_proportional_and_sign()
     test_closed_loop()
     print("all passed")
