@@ -4,7 +4,7 @@
 From this folder, with the Mac venv:
     ../yolo_env_mac/bin/python run.py --show                         # live window (Space = pause, Esc = quit)
     ../yolo_env_mac/bin/python run.py --path sine --seed 3 --video runs/sine3.mp4
-    ../yolo_env_mac/bin/python run.py --controller pd --set kd=0.5 --set yaw_cmd=0.3
+    ../yolo_env_mac/bin/python run.py --controller pd --set kd=0.5 --set yaw=300
     ../yolo_env_mac/bin/python run.py --path turn90 --gaps 1 --current 0.1
 
 Outputs a metrics summary and a per-frame CSV in runs/ (same column names as the robot's own logs, plus ground truth

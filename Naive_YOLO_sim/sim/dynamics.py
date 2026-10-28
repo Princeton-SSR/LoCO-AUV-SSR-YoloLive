@@ -18,10 +18,11 @@ class Robot:
         self.current = cfg.current_speed_mps * np.array([np.cos(ang), np.sin(ang)])
 
     def step(self, cmd, dt):
-        """Advance by dt seconds with the normalised command (surge, yaw in [-1, 1]; +yaw = clockwise)."""
+        """Advance by dt seconds. surge and yaw are MANUAL_CONTROL units (-1000..1000); +yaw = clockwise.
+        ±1000 is full speed / full yaw rate."""
         c = self.cfg
-        surge = 0.0 if abs(cmd.surge) < c.cmd_deadzone else float(np.clip(cmd.surge, -1, 1))
-        yaw = 0.0 if abs(cmd.yaw) < c.cmd_deadzone else float(np.clip(cmd.yaw, -1, 1))
+        surge = 0.0 if abs(cmd.surge) < c.cmd_deadzone else float(np.clip(cmd.surge / 1000.0, -1, 1))
+        yaw = 0.0 if abs(cmd.yaw) < c.cmd_deadzone else float(np.clip(cmd.yaw / 1000.0, -1, 1))
         u_target = c.max_speed_mps * surge
         r_target = -np.radians(c.max_yaw_rate_dps) * yaw          # clockwise command -> psi decreases
 

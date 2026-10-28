@@ -72,8 +72,8 @@ class RenderConfig:
 @dataclass
 class DynamicsConfig:
     """Planar vehicle model: first-order lag from command to speed / yaw rate, plus a wandering current."""
-    max_speed_mps: float = 0.5      # forward speed at surge = 1
-    max_yaw_rate_dps: float = 60.0  # yaw rate at |yaw| = 1
+    max_speed_mps: float = 0.5      # forward speed at surge = 1000
+    max_yaw_rate_dps: float = 60.0  # yaw rate at |yaw| = 1000
     tau_speed_s: float = 0.8
     tau_yaw_s: float = 0.5
     current_speed_mps: float = 0.0  # steady current
@@ -81,7 +81,7 @@ class DynamicsConfig:
     drift_noise_mps: float = 0.02   # random-walk (Ornstein-Uhlenbeck) velocity disturbance
     drift_tau_s: float = 3.0
     yaw_noise_dps: float = 0.5      # white noise on the yaw rate
-    cmd_deadzone: float = 0.0       # |command| below this does nothing (thruster deadband)
+    cmd_deadzone: float = 0.0       # |command| below this does nothing, in MANUAL_CONTROL units
 
 
 @dataclass

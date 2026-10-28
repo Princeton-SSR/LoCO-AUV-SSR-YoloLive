@@ -27,8 +27,8 @@ def add_common_args(p: argparse.ArgumentParser):
     g.add_argument("--supersample", type=int, default=1, help="render at Nx resolution for anti-aliasing (slow)")
 
     g = p.add_argument_group("dynamics / timing")
-    g.add_argument("--max-speed", type=float, default=0.5, help="forward speed (m/s) at surge=1")
-    g.add_argument("--max-yaw-rate", type=float, default=60.0, help="yaw rate (deg/s) at yaw=1")
+    g.add_argument("--max-speed", type=float, default=0.5, help="forward speed (m/s) at surge=1000")
+    g.add_argument("--max-yaw-rate", type=float, default=60.0, help="yaw rate (deg/s) at |yaw|=1000")
     g.add_argument("--current", type=float, default=0.0, help="steady current speed, m/s")
     g.add_argument("--current-dir", type=float, default=90.0, help="direction the current flows to, degrees")
     g.add_argument("--fps", type=float, default=8.0, help="perception loop rate (frames/s) as on the Pi")

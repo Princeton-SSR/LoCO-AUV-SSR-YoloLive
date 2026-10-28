@@ -85,7 +85,7 @@ def compose(ctx, topdown: TopDown, cam_cfg, deadband=None, deadband_center=0.0):
     out = np.concatenate([left, right], axis=1)
     lines = [f"t={ctx['t']:6.1f}s  {tel.state}  offset={tel.offset:+.2f}",
              f"cte={row['cte']:+.2f}m  progress={row['progress']:.1f}/{topdown.transect.length:.1f}m",
-             f"surge={cmd.surge:+.2f} yaw={cmd.yaw:+.2f}  infer={ctx['infer_ms']:.0f}ms"]
+             f"surge={cmd.surge:+.0f} yaw={cmd.yaw:+.0f}  infer={ctx['infer_ms']:.0f}ms"]
     for i, text in enumerate(lines):
         cv2.putText(out, text, (PANEL_W + 8, 20 + 20 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.5, WHITE, 1, cv2.LINE_AA)
     return out
@@ -180,19 +180,21 @@ class ControlPanel:
         info = self.font.render(f"t={ctx['t']:5.1f}s  cte={ctx['row']['cte']:+.2f}m", True, (170, 170, 170))
         screen.blit(info, (128, self.y0 + 10))
         # differential mix of what actually reaches the thrusters (+yaw = clockwise: left faster, right slower)
-        l_th = float(np.clip(applied.surge + applied.yaw, -1, 1))
-        r_th = float(np.clip(applied.surge - applied.yaw, -1, 1))
-        screen.blit(self.font.render(f"Thrusters  L={l_th:+.2f}  R={r_th:+.2f}", True, (255, 212, 0)),
+        l_th = float(np.clip(applied.surge + applied.yaw, -1000, 1000))
+        r_th = float(np.clip(applied.surge - applied.yaw, -1000, 1000))
+        screen.blit(self.font.render(f"Thrusters  L={l_th:+.0f}  R={r_th:+.0f}", True, (255, 212, 0)),
                     (128, self.y0 + 28))
 
         bw = 470
         self._bar(screen, 16, self.y0 + 56, bw, "Offset (smoothed)  [blue = deadband]", tel.offset, None,
                   band=(params["deadband_center"], params["deadband"]))
-        self._bar(screen, 16, self.y0 + 100, bw, "Surge command (computed)", cmd.surge, (56, 189, 248))
-        self._bar(screen, 16, self.y0 + 144, bw, "Yaw command (computed)  - left / + right", cmd.yaw, (244, 114, 182))
+        self._bar(screen, 16, self.y0 + 100, bw, "Surge command (computed)", cmd.surge, (56, 189, 248),
+                  lo=-1000, hi=1000)
+        self._bar(screen, 16, self.y0 + 144, bw, "Yaw command (computed)  - left / + right", cmd.yaw, (244, 114, 182),
+                  lo=-1000, hi=1000)
         grey = (130, 130, 130)
         screen.blit(self.font.render(
-            f"at thrusters (after latency): surge={applied.surge:+.2f} yaw={applied.yaw:+.2f}", True, grey),
+            f"at thrusters (after latency): surge={applied.surge:+.0f} yaw={applied.yaw:+.0f}", True, grey),
             (16, self.y0 + 178))
         screen.blit(self.font.render("Sliders change the live controller only;", True, (100, 100, 100)), (16, self.y0 + 198))
         screen.blit(self.font.render("params.json is NOT modified.  R = reset sliders", True, (100, 100, 100)),
@@ -204,7 +206,8 @@ class ControlPanel:
             v = params[name]
             if kind == "float":
                 screen.blit(self.font.render(label, True, (170, 170, 170)), (rect.x, rect.y - 17))
-                val = self.font.render(f"{v:.2f}", True, WHITE)
+                shown = f"{v:.0f}" if (hi - lo) > 5 else f"{v:.2f}"
+                val = self.font.render(shown, True, WHITE)
                 screen.blit(val, (rect.right - val.get_width(), rect.y - 17))
                 pg.draw.rect(screen, (60, 60, 60), (rect.x, rect.centery - 2, rect.w, 4), border_radius=2)
                 frac = (v - lo) / (hi - lo)

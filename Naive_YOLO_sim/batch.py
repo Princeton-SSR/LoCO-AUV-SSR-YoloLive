@@ -2,7 +2,7 @@
 """Batch evaluation: many seeds x paths x controllers x parameter values, results to a CSV and a summary table.
 
     ../yolo_env_mac/bin/python batch.py --seeds 10 --paths gentle_s sine turn90 \
-        --controllers naive pd --sweep deadband=0.1,0.2,0.33 --sweep yaw_cmd=0.15,0.3
+        --controllers naive pd --sweep deadband=0.1,0.2,0.33 --sweep yaw=150,300
 
 Scenarios (floor texture etc.) are built once per (path, seed) and shared by all controller / parameter combinations,
 so every combination faces exactly the same world.

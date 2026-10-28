@@ -49,14 +49,14 @@ def test_closed_loop():
     off, dt = 0.7, 0.1
     for k in range(300):
         cmd, _ = ctrl.update(off, k * dt)
-        off -= cmd.yaw * 1.0 * dt          # yawing right moves the line toward the left of the image
+        off -= cmd.yaw / 1000.0 * dt       # yawing right moves the line toward the left of the image
     assert abs(off) < 0.2, off
     print(f"ok  closed loop (final offset {off:+.2f})")
 
 
 def test_offset_and_lost():
     assert abs(box_offset((320, 0), 640)) < 1e-9 and box_offset((640, 0), 640) == 1.0
-    ctrl = NaiveController()
+    ctrl = NaiveController(NaiveConfig(lost_hold=1.0))
     ctrl.update(0.5, 0.0)
     cmd, tel = ctrl.update(None, 0.5)
     assert tel.state == "COAST" and cmd.surge > 0 and cmd.yaw == 0

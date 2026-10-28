@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 @dataclass
 class Command:
-    """Normalised actuator request, each in [-1, 1]: surge (+ forward) and yaw (+ clockwise / right)."""
+    """Actuator request in MANUAL_CONTROL units, each in [-1000, 1000]: surge (+ forward) and yaw (+ clockwise / right)."""
     surge: float = 0.0
     yaw: float = 0.0
 
@@ -22,12 +22,12 @@ class Command:
 @dataclass
 class NaiveConfig:
     """Tunable parameters of NaiveController."""
-    surge: float = 0.25         # constant forward command while the line is visible
-    yaw_cmd: float = 0.30       # yaw magnitude: fixed in bang-bang mode, the maximum in proportional mode
+    surge: float = 250          # constant forward command while the line is visible, -1000..1000
+    yaw: float = 300        # yaw magnitude: fixed in bang-bang mode, the maximum in proportional mode, 0..1000
     deadband: float = 0.10      # |offset - deadband_center| below this -> no yaw (offset is in half-image-widths, -1..1)
     deadband_center: float = 0.0  # where the deadband sits: 0 = image centre, +0.2 = 20% of the half-width to the right.
                                   # The controller steers so the line ends up at this offset
-    proportional: bool = False  # False: fixed +-yaw_cmd (bang-bang). True: yaw_cmd * offset / 1.0
+    proportional: bool = False  # False: fixed +-yaw (bang-bang). True: yaw * offset (offset is -1..1)
     smooth: float = 0.5         # 0..1, weight of the newest offset in the moving average (1 = no smoothing)
     yaw_sign: float = 1.0       # use -1 if the robot turns away from the line
     lost_hold: float = 0.0      # seconds to keep creeping forward after losing the line (0 = stop immediately: LOST, both thrusters 0)
@@ -76,9 +76,9 @@ class NaiveController:
         if abs(err) < c.deadband:
             yaw = 0.0
         elif c.proportional:
-            yaw = c.yaw_cmd * max(-1.0, min(1.0, err))
+            yaw = c.yaw * max(-1.0, min(1.0, err))
         else:
-            yaw = c.yaw_cmd if err > 0 else -c.yaw_cmd
+            yaw = c.yaw if err > 0 else -c.yaw
         return Command(c.surge, c.yaw_sign * yaw), Telemetry("TRACK", self._off)
 
     def _lost(self, t):

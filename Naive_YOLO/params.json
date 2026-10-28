@@ -1,7 +1,7 @@
 {
-  "surge": 0.25,
-  "yaw_cmd": 0.2,
-  "deadband": 0.1,
+  "surge": 80.0,
+  "yaw": 30.0,
+  "deadband": 0.17,
   "deadband_center": 0.1,
   "smooth": 0.5,
   "lost_hold": 0.0,

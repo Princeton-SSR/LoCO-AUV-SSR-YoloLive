@@ -12,9 +12,9 @@ One row per control-loop iteration:
     box_cx, box_cy, box_w, box_h, box_angle   picked oriented box in image pixels (angle in radians; blank if none)
     raw_offset  box-centre offset from image centre, -1..1 (blank if none)
     offset      smoothed offset used by the controller
-    surge, yaw  commands sent to the vehicle, -1..1
+    surge, yaw  commands sent to the vehicle, MANUAL_CONTROL units -1000..1000
     infer_ms    model inference time
-    param_*     controller parameters in effect for that frame (surge, yaw_cmd, deadband, deadband_center, smooth, lost_hold,
+    param_*     controller parameters in effect for that frame (surge, yaw, deadband, deadband_center, smooth, lost_hold,
                 proportional, yaw_sign); they change mid-run if edited on the web page
 
 Usage:
@@ -31,7 +31,7 @@ LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 
 # Controller parameters recorded on every row (columns are named param_<name>). Logged per row, not once,
 # because they can be changed live from the web page during a run.
-PARAM_FIELDS = ["surge", "yaw_cmd", "deadband", "deadband_center", "smooth", "lost_hold", "proportional", "yaw_sign"]
+PARAM_FIELDS = ["surge", "yaw", "deadband", "deadband_center", "smooth", "lost_hold", "proportional", "yaw_sign"]
 
 COLUMNS = ["wall_time", "t", "frame", "state", "detected", "score",
            "box_cx", "box_cy", "box_w", "box_h", "box_angle",
@@ -65,7 +65,7 @@ class RunLogger:
             datetime.now().isoformat(timespec="milliseconds"), f"{t:.3f}", self._n, state,
             int(det is not None), score, *box,
             "" if raw_offset is None else f"{raw_offset:.4f}", f"{offset:.4f}",
-            f"{cmd.surge:.3f}", f"{cmd.yaw:.3f}", f"{infer_ms:.0f}",
+            f"{cmd.surge:.0f}", f"{cmd.yaw:.0f}", f"{infer_ms:.0f}",
             *[self._param(p) for p in PARAM_FIELDS]])
         self._f.flush()
 

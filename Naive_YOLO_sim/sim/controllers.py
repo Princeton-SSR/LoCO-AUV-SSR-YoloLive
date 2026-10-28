@@ -21,8 +21,8 @@ DEFAULT_PARAMS = Path(__file__).resolve().parent.parent.parent / "Naive_YOLO" / 
 # Parameters offered as live sliders in the sim window. Mirrors TUNABLES in Naive_YOLO/stream.py (the web page):
 # (name, label, kind, min, max, step); kind "sign" is a checkbox mapping checked -> -1.
 TUNABLES = [
-    ("surge", "Surge", "float", 0.0, 0.5, 0.01),
-    ("yaw_cmd", "Yaw command", "float", 0.0, 1.0, 0.01),
+    ("surge", "Surge (-1000..1000)", "float", -1000, 1000, 10),
+    ("yaw", "Yaw command (0..1000)", "float", 0, 1000, 10),
     ("deadband", "Deadband", "float", 0.0, 0.5, 0.01),
     ("deadband_center", "Deadband centre", "float", -0.5, 0.5, 0.01),
     ("smooth", "Smoothing (1 = none)", "float", 0.05, 1.0, 0.05),
@@ -30,7 +30,7 @@ TUNABLES = [
     ("proportional", "Proportional yaw", "bool", 0, 1, 1),
     ("yaw_sign", "Invert yaw", "sign", -1, 1, 1),
 ]
-TUNABLE_DEFAULTS = {"surge": 0.25, "yaw_cmd": 0.3, "deadband": 0.1, "deadband_center": 0.0, "smooth": 0.5,
+TUNABLE_DEFAULTS = {"surge": 250, "yaw": 300, "deadband": 0.1, "deadband_center": 0.0, "smooth": 0.5,
                     "lost_hold": 1.0, "proportional": False, "yaw_sign": 1.0}
 
 
@@ -85,7 +85,7 @@ class NaiveProportionalAdapter(NaiveAdapter):
 class PDAdapter:
     """Example alternative: proportional + derivative on the offset, surge reduced while turning hard.
 
-    params used: surge, yaw_cmd (max yaw), deadband, smooth, lost_hold, yaw_sign, kp (default 1.0), kd (default 0.3)."""
+    params used: surge, yaw (max yaw), deadband, smooth, lost_hold, yaw_sign, kp (default 1.0), kd (default 0.3)."""
     name = "pd"
 
     def __init__(self, params):
@@ -96,7 +96,7 @@ class PDAdapter:
 
     def step(self, obs):
         p = self.p
-        surge, yaw_max = p.get("surge", 0.25), p.get("yaw_cmd", 0.3)
+        surge, yaw_max = p.get("surge", 250), p.get("yaw", 300)
         if obs.offset is None:
             if self.last_seen is not None and obs.t - self.last_seen < p.get("lost_hold", 1.0):
                 return Command(surge * 0.5), Telemetry("COAST", self.off or 0.0)

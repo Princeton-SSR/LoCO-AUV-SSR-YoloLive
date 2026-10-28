@@ -64,7 +64,7 @@ def test_rendered_tape_is_visible_and_on_correct_side():
 def test_dynamics_directions():
     r = Robot(DynamicsConfig(drift_noise_mps=0, yaw_noise_dps=0), seed=0)
     for _ in range(200):
-        r.step(Command(0.5, 0.5), 0.02)
+        r.step(Command(500, 500), 0.02)
     assert r.x > 0 and r.psi < 0 and r.y < 0, (r.x, r.y, r.psi)  # yaw + = clockwise: heading decreases, curves right
     print("ok  +yaw turns clockwise")
 

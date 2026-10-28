@@ -8,6 +8,9 @@ Examples:
     # bench test: real camera + model, commands only printed, annotated frames saved
     python3 follow_transect.py --model ../best_dillon.onnx --dry-run --save-every 5
 
+    # replay a recorded video through detection + controller (no camera, no MAVLink), view it on the website
+    python3 follow_transect.py --model ../best_dillon.onnx --video clip.mov --stream
+
     # in the water (arms the vehicle itself after the start delay)
     python3 follow_transect.py --model ../best_dillon.onnx --arm --max-seconds 60
 
@@ -37,14 +40,19 @@ def parse_args():
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--webcam", type=int, nargs="?", const=0, default=None, metavar="INDEX",
                    help="use an OpenCV webcam (default index 0) instead of the Pi camera, for testing on a laptop")
+    p.add_argument("--video", metavar="FILE", default=None,
+                   help="run on a video file instead of a camera (implies --dry-run: no MAVLink, never arms, no start "
+                        "delay, no lost-line stop). Played at the video's own frame rate; combine with --stream to watch it. "
+                        "--rotate defaults to 0 for videos unless given explicitly")
+    p.add_argument("--loop", action="store_true", help="with --video: restart the video when it ends instead of stopping")
     p.add_argument("--rotate", type=int, choices=[0, 180], default=180,
                    help="rotate the camera image before processing; default 180 because the camera is mounted "
                         "upside down (use 0 for an upright camera / webcam)")
     p.add_argument("--cam-size", type=int, nargs=2, default=[640, 480], metavar=("W", "H"))
 
     g = p.add_argument_group("control")
-    g.add_argument("--surge", type=float, default=0.25, help="constant forward command while the line is visible")
-    g.add_argument("--yaw", type=float, default=0.30, help="yaw command magnitude (max, if --proportional)")
+    g.add_argument("--surge", type=float, default=250, help="forward command while the line is visible, -1000..1000")
+    g.add_argument("--yaw", type=float, default=300, help="yaw command magnitude, 0..1000 (the maximum if --proportional)")
     g.add_argument("--deadband", type=float, default=0.10,
                    help="no yaw while the box centre is within this fraction of half the image width")
     g.add_argument("--deadband-center", type=float, default=0.0,
@@ -83,6 +91,13 @@ def parse_args():
 def main():
     """Set up model, controller, vehicle and camera, then run the capture -> detect -> control -> command loop."""
     args = parse_args()
+    if args.video:
+        args.dry_run = True       # never talk to the autopilot while replaying a file
+        args.arm = False
+        args.start_delay = 0.0
+        args.lost_timeout = 0.0   # 0 = never stop because the line was lost; the run ends with the video
+        if "--rotate" not in sys.argv:
+            args.rotate = 0       # recorded clips are normally upright
 
     # ---- model
     so = ort.SessionOptions()
@@ -97,7 +112,7 @@ def main():
     # ---- control
     W, H = args.cam_size
     ctrl = NaiveController(NaiveConfig(
-        surge=args.surge, yaw_cmd=args.yaw, deadband=args.deadband, deadband_center=args.deadband_center, proportional=args.proportional,
+        surge=args.surge, yaw=args.yaw, deadband=args.deadband, deadband_center=args.deadband_center, proportional=args.proportional,
         smooth=args.smooth, yaw_sign=args.yaw_sign, lost_hold=args.lost_hold))
 
     # ---- vehicle
@@ -105,7 +120,40 @@ def main():
     vehicle.connect()
 
     # ---- camera
-    if args.webcam is not None:
+    if args.video:
+        import cv2
+
+        class VideoCamera:
+            """Video file with the same capture_array()/close() interface as Picamera2 (returns RGB).
+            Paced to the file's frame rate; raises EOFError at the end (or loops with --loop)."""
+            def __init__(self, path, loop):
+                self.cap = cv2.VideoCapture(path)
+                if not self.cap.isOpened():
+                    sys.exit(f"Could not open video {path}")
+                self.loop = loop
+                self.dt = 1.0 / (self.cap.get(cv2.CAP_PROP_FPS) or 30.0)
+                self.next_t = time.monotonic()
+
+            def capture_array(self):
+                ok, bgr = self.cap.read()
+                if not ok and self.loop:
+                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    ok, bgr = self.cap.read()
+                if not ok:
+                    raise EOFError
+                self.next_t += self.dt
+                delay = self.next_t - time.monotonic()
+                if delay > 0:
+                    time.sleep(delay)          # real-time playback
+                else:
+                    self.next_t = time.monotonic()  # inference slower than the video: don't try to catch up
+                return cv2.cvtColor(cv2.resize(bgr, (W, H)), cv2.COLOR_BGR2RGB)
+
+            def close(self):
+                self.cap.release()
+
+        cam = VideoCamera(args.video, args.loop)
+    elif args.webcam is not None:
         # This part is for testing it on my computer 
         import cv2
 
@@ -159,12 +207,16 @@ def main():
             if args.max_seconds and now - t_start > args.max_seconds:
                 print("\nmax-seconds reached")
                 break
-            if now - last_seen > args.lost_timeout:
+            if args.lost_timeout and now - last_seen > args.lost_timeout:
                 print("\nline lost for too long, stopping")
                 break
 
             # --- grab a frame and prepare it for the model
-            frame = cam.capture_array()[..., :3]
+            try:
+                frame = cam.capture_array()[..., :3]
+            except EOFError:
+                print("\nvideo finished")
+                break
             if args.rotate == 180:
                 frame = frame[::-1, ::-1]   # camera is mounted upside down: undo it before ANY processing
             frame = np.ascontiguousarray(frame)
@@ -193,8 +245,8 @@ def main():
             if logger:
                 logger.log(time.monotonic() - t_start, tel.state, det, offset, tel.offset, cmd, infer_ms)
             if not args.dry_run:
-                sys.stdout.write(f"\r{tel.state:5s} offset={tel.offset:+.2f} surge={cmd.surge:+.2f} "
-                                 f"yaw={cmd.yaw:+.2f} infer={infer_ms:.0f}ms   ")
+                sys.stdout.write(f"\r{tel.state:5s} offset={tel.offset:+.2f} surge={cmd.surge:+.0f} "
+                                 f"yaw={cmd.yaw:+.0f} infer={infer_ms:.0f}ms   ")
                 sys.stdout.flush()
     except KeyboardInterrupt:
         print("\nInterrupted")

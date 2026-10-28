@@ -1,7 +1,8 @@
 """Vehicle interfaces: MAVLink (same link/convention as LatestControlScript.py) and a dry-run stand-in.
 
 MANUAL_CONTROL mapping used by LatestControlScript.send_manual_control(x, y, z, r):
-    x = surge (+ forward), y = 0 (robot has no sway), z = throttle (0..1000, 500 = neutral), r = yaw (+ clockwise)
+    x = surge (+ forward, -1000..1000), y = 0 (robot has no sway), z = throttle (0..1000, 500 = neutral),
+    r = yaw (+ clockwise, -1000..1000). Commands are already in these units; they are only clipped here.
 A background thread re-sends the latest command at 20 Hz (so the autopilot's pilot-input failsafe never trips) and
 falls back to neutral if no fresh command arrives within `cmd_timeout` (e.g. if the vision loop hangs).
 
@@ -36,8 +37,8 @@ class DryRunVehicle:
         now = time.monotonic()
         if now - self._t > 0.25:
             self._t = now
-            print(f"\n[dry-run] x(surge)={_clip(cmd.surge*1000):5d}  y(sway)=    0  "
-                  f"r(yaw)={_clip(cmd.yaw*1000):5d}", end="")
+            print(f"\n[dry-run] x(surge)={_clip(cmd.surge):5d}  y(sway)=    0  "
+                  f"r(yaw)={_clip(cmd.yaw):5d}", end="")
 
 
 class MavVehicle:
@@ -94,7 +95,7 @@ class MavVehicle:
         with self._tx_lock:
             self.loco.mav.manual_control_send(
                 self.loco.target_system,
-                _clip(cmd.surge * 1000), 0, 500, _clip(cmd.yaw * 1000), 0)
+                _clip(cmd.surge), 0, 500, _clip(cmd.yaw), 0)
 
     def set_command(self, cmd: Command):
         """Store the newest command (thread-safe); the send loop streams it to the autopilot."""
