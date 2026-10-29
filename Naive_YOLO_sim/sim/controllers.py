@@ -58,7 +58,8 @@ class NaiveAdapter:
     name = "naive"
 
     def __init__(self, params):
-        known = {f.name for f in fields(rc.NaiveConfig)}
+        # right_bias compensates the real vehicle's thrusters only; keep the sim symmetric
+        known = {f.name for f in fields(rc.NaiveConfig)} - {"right_bias"}
         self.cfg = rc.NaiveConfig(**{k: v for k, v in params.items() if k in known})
         self.ctrl = rc.NaiveController(self.cfg)
 

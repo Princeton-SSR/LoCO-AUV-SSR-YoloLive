@@ -14,28 +14,31 @@ One row per control-loop iteration:
     offset      smoothed offset used by the controller
     surge, yaw  commands sent to the vehicle, MANUAL_CONTROL units -1000..1000
     infer_ms    model inference time
+    roll_deg ... water_temp_c   latest autopilot attitude / IMU / depth (vehicle.NAV_FIELDS; blank if unavailable)
     param_*     controller parameters in effect for that frame (surge, yaw, deadband, deadband_center, smooth, lost_hold,
                 proportional, yaw_sign); they change mid-run if edited on the web page
 
 Usage:
     logger = RunLogger(cfg=cfg)     # opens a new file; cfg's current values are logged on every row
-    logger.log(t, state, det, raw_offset, offset, cmd, infer_ms)   # once per frame
+    logger.log(t, state, det, raw_offset, offset, cmd, infer_ms, nav)   # once per frame
     logger.close()
 """
 import csv
 import os
 from datetime import datetime
 
+from vehicle import NAV_FIELDS
+
 # Always the `logs` folder next to this file, no matter which directory the script is launched from
 LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 
 # Controller parameters recorded on every row (columns are named param_<name>). Logged per row, not once,
 # because they can be changed live from the web page during a run.
-PARAM_FIELDS = ["surge", "yaw", "deadband", "deadband_center", "smooth", "lost_hold", "proportional", "yaw_sign"]
+PARAM_FIELDS = ["surge", "yaw", "deadband", "deadband_center", "right_bias", "smooth", "lost_hold", "lost_timeout", "lost_spin", "proportional", "yaw_sign"]
 
 COLUMNS = ["wall_time", "t", "frame", "state", "detected", "score",
            "box_cx", "box_cy", "box_w", "box_h", "box_angle",
-           "raw_offset", "offset", "surge", "yaw", "infer_ms"] + ["param_" + p for p in PARAM_FIELDS]
+           "raw_offset", "offset", "surge", "yaw", "infer_ms"] + NAV_FIELDS + ["param_" + p for p in PARAM_FIELDS]
 
 
 class RunLogger:
@@ -53,8 +56,10 @@ class RunLogger:
         self._n = 0
         print(f"Logging to {self.path}")
 
-    def log(self, t, state, det, raw_offset, offset, cmd, infer_ms):
-        """Record one frame. det is (cx, cy, w, h, angle, score, cls) or None; cmd has .surge and .yaw."""
+    def log(self, t, state, det, raw_offset, offset, cmd, infer_ms, nav=None):
+        """Record one frame. det is (cx, cy, w, h, angle, score, cls) or None; cmd has .surge and .yaw;
+        nav is vehicle.telemetry() (or None)."""
+        nav = nav or {}
         self._n += 1
         if det is not None:
             box = [f"{det[0]:.1f}", f"{det[1]:.1f}", f"{det[2]:.1f}", f"{det[3]:.1f}", f"{det[4]:.4f}"]
@@ -66,6 +71,7 @@ class RunLogger:
             int(det is not None), score, *box,
             "" if raw_offset is None else f"{raw_offset:.4f}", f"{offset:.4f}",
             f"{cmd.surge:.0f}", f"{cmd.yaw:.0f}", f"{infer_ms:.0f}",
+            *["" if nav.get(k) is None else f"{nav[k]:.3f}" for k in NAV_FIELDS],
             *[self._param(p) for p in PARAM_FIELDS]])
         self._f.flush()
 

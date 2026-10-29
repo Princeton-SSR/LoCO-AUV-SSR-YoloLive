@@ -1,10 +1,13 @@
 {
-  "surge": 80.0,
-  "yaw": 30.0,
-  "deadband": 0.17,
-  "deadband_center": 0.1,
+  "surge": 300.0,
+  "yaw": 300.0,
+  "deadband": 0.08,
+  "deadband_center": -0.11,
+  "right_bias": 70.0,
   "smooth": 0.5,
   "lost_hold": 0.0,
-  "proportional": false,
-  "yaw_sign": 1.0
+  "lost_timeout": 30.0,
+  "lost_spin": 300.0,
+  "proportional": true,
+  "yaw_sign": -1.0
 }

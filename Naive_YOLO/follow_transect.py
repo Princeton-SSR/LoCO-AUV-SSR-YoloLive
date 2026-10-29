@@ -57,11 +57,18 @@ def parse_args():
                    help="no yaw while the box centre is within this fraction of half the image width")
     g.add_argument("--deadband-center", type=float, default=0.0,
                    help="shift the deadband left (-) / right (+), in half-image-widths (0 = image centre)")
+    g.add_argument("--right-bias", type=float, default=0.0,
+                   help="extra yaw magnitude added only when turning right (toward a line on the right), 0..1000; "
+                        "applied before --yaw-sign")
     g.add_argument("--proportional", action="store_true", help="scale yaw with the offset instead of fixed +-yaw")
     g.add_argument("--smooth", type=float, default=0.5, help="weight of the newest offset in the moving average")
     g.add_argument("--yaw-sign", type=float, default=1.0, help="use -1 if the robot yaws away from the line")
     g.add_argument("--lost-hold", type=float, default=1.0, help="seconds to creep forward after losing the line")
-    g.add_argument("--lost-timeout", type=float, default=10.0, help="stop the run after this long without the line")
+    g.add_argument("--lost-spin", type=float, default=0.0,
+                   help="0 = off. Otherwise, once the line is lost (after --lost-hold) spin in place at this yaw command "
+                        "(0..1000) toward the side the line was last seen on")
+    g.add_argument("--lost-timeout", type=float, default=10.0,
+                   help="stop the run after this long without the line, 0 = never (also editable in params.json / the web page)")
 
     g = p.add_argument_group("vehicle")
     g.add_argument("--dry-run", action="store_true", help="don't touch MAVLink, just print commands")
@@ -69,9 +76,9 @@ def parse_args():
     g.add_argument("--baud", type=int, default=921600)
     g.add_argument("--source-system", type=int, default=255,
                    help="MAVLink system ID we send as; must match the autopilot's SYSID_MYGCS (255 by default)")
-    g.add_argument("--mode", default="STABILIZE")
+    g.add_argument("--mode", default="MANUAL")
     g.add_argument("--arm", action="store_true", help="arm after the start delay (and disarm at the end)")
-    g.add_argument("--start-delay", type=float, default=10.0)
+    g.add_argument("--start-delay", type=float, default=5.0)
     g.add_argument("--max-seconds", type=float, default=0.0, help="0 = run until Ctrl+C")
 
     g = p.add_argument_group("debug")
@@ -112,8 +119,8 @@ def main():
     # ---- control
     W, H = args.cam_size
     ctrl = NaiveController(NaiveConfig(
-        surge=args.surge, yaw=args.yaw, deadband=args.deadband, deadband_center=args.deadband_center, proportional=args.proportional,
-        smooth=args.smooth, yaw_sign=args.yaw_sign, lost_hold=args.lost_hold))
+        surge=args.surge, yaw=args.yaw, deadband=args.deadband, deadband_center=args.deadband_center, right_bias=args.right_bias, proportional=args.proportional,
+        smooth=args.smooth, yaw_sign=args.yaw_sign, lost_hold=args.lost_hold, lost_timeout=args.lost_timeout, lost_spin=args.lost_spin))
 
     # ---- vehicle
     vehicle = DryRunVehicle() if args.dry_run else MavVehicle(args.port, args.baud, args.mode, source_system=args.source_system)
@@ -207,7 +214,8 @@ def main():
             if args.max_seconds and now - t_start > args.max_seconds:
                 print("\nmax-seconds reached")
                 break
-            if args.lost_timeout and now - last_seen > args.lost_timeout:
+            lost_timeout = 0.0 if args.video else ctrl.cfg.lost_timeout  # live value: params.json / web page; videos never stop early
+            if lost_timeout and now - last_seen > lost_timeout:
                 print("\nline lost for too long, stopping")
                 break
 
@@ -240,10 +248,11 @@ def main():
             n += 1
             if args.save_every and n % args.save_every == 0:
                 annotate(frame, det, tel, cmd, ctrl.cfg.deadband, deadband_center=ctrl.cfg.deadband_center)
+            nav = vehicle.telemetry()
             if streamer:
-                streamer.update(frame, det, tel, cmd, offset, infer_ms)
+                streamer.update(frame, det, tel, cmd, offset, infer_ms, nav)
             if logger:
-                logger.log(time.monotonic() - t_start, tel.state, det, offset, tel.offset, cmd, infer_ms)
+                logger.log(time.monotonic() - t_start, tel.state, det, offset, tel.offset, cmd, infer_ms, nav)
             if not args.dry_run:
                 sys.stdout.write(f"\r{tel.state:5s} offset={tel.offset:+.2f} surge={cmd.surge:+.0f} "
                                  f"yaw={cmd.yaw:+.0f} infer={infer_ms:.0f}ms   ")

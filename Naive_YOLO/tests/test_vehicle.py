@@ -17,17 +17,17 @@ from controller import Command
 from vehicle import DryRunVehicle, MavVehicle
 
 # ---- test parameters (MANUAL_CONTROL units, -1000..1000) ----
-SURGE = 50          # forward command used in every segment
-YAW = 20            # yaw magnitude: + = right (clockwise), - = left
-SEGMENT_SECONDS = 2.0
+SURGE = 200          # forward command used in every segment
+YAW = 75            # yaw magnitude: + = right (clockwise), - = left
+SEGMENT_SECONDS = 3.0
 START_DELAY = 5.0   # seconds before the sequence starts (after arming)
 SEND_HZ = 10        # how often the command is refreshed (MavVehicle falls back to neutral after 0.5 s of silence)
 
 # (label, surge, yaw)
 SEQUENCE = [
-    ("straight", SURGE, 0),
-    ("right", SURGE, +YAW),
-    ("left", SURGE, -YAW),
+    ("right", SURGE, -YAW),
+    ("right", SURGE, -YAW),
+    ("right", SURGE, -YAW),
 ]
 
 
@@ -47,7 +47,7 @@ def main():
     p.add_argument("--port", default="/dev/ttyAMA0")
     p.add_argument("--baud", type=int, default=921600)
     p.add_argument("--source-system", type=int, default=255)
-    p.add_argument("--mode", default="STABILIZE")
+    p.add_argument("--mode", default="MANUAL")
     p.add_argument("--start-delay", type=float, default=START_DELAY)
     args = p.parse_args()
 

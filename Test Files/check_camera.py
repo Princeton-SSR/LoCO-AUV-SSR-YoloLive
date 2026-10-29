@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Quick check that the Raspberry Pi camera works: detects it, grabs a frame, saves a JPEG."""
 import sys
+from pathlib import Path
 from picamera2 import Picamera2
 
-OUT = "/home/ssr-loco/Desktop/Irene/camera_test.jpg"
+OUT = str(Path(__file__).resolve().parent / "camera_test.jpg")  # saved next to this script
 
 cams = Picamera2.global_camera_info()
 if not cams:

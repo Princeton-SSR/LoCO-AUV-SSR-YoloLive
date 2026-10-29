@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Live web view for follow_transect.py: annotated camera MJPEG stream + a live status panel.
 
-    Streamer(port, deadband).update(frame, det, tel, cmd, raw_offset, infer_ms)   # call once per frame
+    Streamer(port, deadband).update(frame, det, tel, cmd, raw_offset, infer_ms, nav)   # call once per frame
 
 Open http://<pi-ip>:PORT/ in a browser. Endpoints:
     /         web page: video, state, offset bar, surge/yaw bars, detection score, inference time.
@@ -60,8 +60,11 @@ TUNABLES = [
     ("yaw", "Yaw command (0..1000)", "float", 0, 1000, 10),
     ("deadband", "Deadband", "float", 0.0, 0.5, 0.01),
     ("deadband_center", "Deadband centre (- left / + right)", "float", -0.5, 0.5, 0.01),
+    ("right_bias", "Right-turn bias (extra yaw, 0..1000)", "float", 0, 1000, 5),
     ("smooth", "Smoothing (1 = none)", "float", 0.05, 1.0, 0.05),
     ("lost_hold", "Lost hold (s)", "float", 0.0, 5.0, 0.1),
+    ("lost_timeout", "Lost timeout (s, 0 = never stop)", "float", 0.0, 120.0, 1.0),
+    ("lost_spin", "Lost spin yaw (0 = off, 0..1000)", "float", 0, 1000, 5),
     ("proportional", "Proportional yaw", "bool", 0, 1, 1),
     ("yaw_sign", "Invert yaw", "sign", -1, 1, 1),
 ]
@@ -132,6 +135,9 @@ PAGE = b"""<!doctype html>
     <tr><td>Inference</td><td id="infer">--</td></tr>
     <tr><td>Loop rate</td><td id="fps">--</td></tr>
     <tr><td>Run time</td><td id="t">--</td></tr>
+    <tr><td>Depth</td><td id="depth">--</td></tr>
+    <tr><td>Heading</td><td id="heading">--</td></tr>
+    <tr><td>Roll / pitch</td><td id="rp">--</td></tr>
   </table>
   <h2 style="margin-top:22px">CONTROLS <span id="saved" style="color:#4ade80;font-weight:400"></span></h2>
   <div id="ctl"></div>
@@ -148,6 +154,9 @@ function post(name, value) {
 }
 async function buildControls() {
   const p = await (await fetch("/params", {cache: "no-store"})).json();
+  p.spec.forEach(s => {   // every tunable is also a CSV column (deadband / deadband_center already have their own)
+    if (s.name !== "deadband" && s.name !== "deadband_center") CSV_COLS.push("param_" + s.name);
+  });
   p.spec.forEach(s => {
     const row = document.createElement("div"); row.className = "row";
     const v = p.values[s.name];
@@ -202,6 +211,9 @@ async function tick() {
     $("infer").textContent = s.infer_ms == null ? "--" : s.infer_ms.toFixed(0) + " ms";
     $("fps").textContent = s.fps == null ? "--" : s.fps.toFixed(1) + " Hz";
     $("t").textContent = s.elapsed.toFixed(1) + " s";
+    $("depth").textContent = s.depth_m == null ? "--" : s.depth_m.toFixed(2) + " m";
+    $("heading").textContent = s.heading_deg == null ? "--" : s.heading_deg.toFixed(0) + " deg";
+    $("rp").textContent = s.roll_deg == null ? "--" : f(s.roll_deg, 1) + " / " + f(s.pitch_deg, 1) + " deg";
   } catch (e) {
     streamMisses += 1;
     if (streamMisses >= 3) streamDown = true;
@@ -211,7 +223,8 @@ async function tick() {
 setInterval(tick, 150); tick();
 
 // Recording stays in the browser. Stop builds one zip (commands.csv + frames/frame_#####.jpg) and downloads it.
-const CSV_COLS = ["frame","wall_time","elapsed","state","score","box_cx","box_cy","box_w","box_h","box_angle","raw_offset","offset","surge","yaw","infer_ms","fps","deadband","deadband_center"];
+const CSV_COLS = ["frame","wall_time","elapsed","state","score","box_cx","box_cy","box_w","box_h","box_angle","raw_offset","offset","surge","yaw","infer_ms","fps","deadband","deadband_center",
+  "roll_deg","pitch_deg","heading_deg","roll_rate_dps","pitch_rate_dps","yaw_rate_dps","acc_x_ms2","acc_y_ms2","acc_z_ms2","depth_m","pressure_mbar","water_temp_c"];
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
   for (let n = 0; n < 256; n++) {
@@ -504,8 +517,11 @@ class Streamer:
         self._server.daemon_threads = True
         threading.Thread(target=self._server.serve_forever, daemon=True).start()
 
-    def update(self, frame, det, tel, cmd, raw_offset=None, infer_ms=None):
-        """Call once per loop. Always refreshes the status; renders/encodes the frame only if someone is watching."""
+    def update(self, frame, det, tel, cmd, raw_offset=None, infer_ms=None, nav=None):
+        """Call once per loop. Always refreshes the status; renders/encodes the frame only if someone is watching.
+
+        nav: vehicle.telemetry() dict (attitude / IMU / depth), added to the status and the recorded CSV.
+        """
         now = time.monotonic()
         dt = now - self._last_update
         self._last_update = now
@@ -520,6 +536,7 @@ class Streamer:
                 "score": float(det[5]) if det is not None else None,
                 "infer_ms": float(infer_ms) if infer_ms is not None else None,
                 "fps": fps, "elapsed": now - self._t0,
+                **{k: None if v is None else float(v) for k, v in (nav or {}).items()},
             }
             self._status_t = now
             snap = dict(self._status)
@@ -529,6 +546,10 @@ class Streamer:
             snap["wall_time"] = time.time()
             snap["deadband"] = float(self.deadband)
             snap["deadband_center"] = float(self.deadband_center)
+            if self.cfg is not None:
+                for name, *_ in TUNABLES:
+                    v = getattr(self.cfg, name)
+                    snap["param_" + name] = int(v) if isinstance(v, bool) else float(v)
             if det is not None:
                 snap["box_cx"], snap["box_cy"], snap["box_w"], snap["box_h"], snap["box_angle"] = (float(v) for v in det[:5])
             else:
